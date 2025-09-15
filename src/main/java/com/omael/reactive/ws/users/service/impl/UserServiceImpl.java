@@ -13,6 +13,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
 import java.util.ArrayList;
@@ -22,10 +23,13 @@ import java.util.UUID;
 public class UserServiceImpl implements UserService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final Sinks.Many<UserRest> usersSinks;
 
-    public UserServiceImpl(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+    public UserServiceImpl(UserRepository userRepository,
+                           PasswordEncoder passwordEncoder, Sinks.Many<UserRest> usersSinks) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.usersSinks = usersSinks;
     }
 
     @Override
@@ -33,7 +37,8 @@ public class UserServiceImpl implements UserService {
         return createUserRequest
                 .flatMap(this::convertToEntity)
                 .flatMap(userRepository::save)
-                .mapNotNull(this::convertToRest);
+                .mapNotNull(this::convertToRest)
+                .doOnSuccess(usersSinks::tryEmitNext);
     }
 
     @Override
@@ -46,6 +51,13 @@ public class UserServiceImpl implements UserService {
     public Flux<UserRest> getAllUsers(Pageable pageable) {
         return userRepository.findAllBy(pageable)
                 .mapNotNull(this::convertToRest);
+    }
+
+    @Override
+    public Flux<UserRest> streamUser() {
+        return usersSinks.asFlux()
+                .publish()
+                .autoConnect(1);
     }
 
     @Override
